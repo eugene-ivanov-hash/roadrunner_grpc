@@ -16,6 +16,11 @@ type Interceptor interface {
 	Name() string
 }
 
+type StreamInterceptor interface {
+	StreamServerInterceptor() grpc.StreamServerInterceptor
+	Name() string
+}
+
 type Configurer interface {
 	// UnmarshalKey takes a single key and unmarshal it into a Struct.
 	UnmarshalKey(name string, out any) error

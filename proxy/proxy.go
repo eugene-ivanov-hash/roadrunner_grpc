@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stderr "errors"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"strings"
@@ -69,6 +70,12 @@ type rpcContext struct {
 	Context map[string][]string `json:"context"`
 }
 
+type streamMethod struct {
+	Name           string
+	StreamsRequest bool
+	StreamsReturns bool
+}
+
 // Proxy manages GRPC/RoadRunner bridge.
 type Proxy struct {
 	mu       *sync.RWMutex
@@ -78,6 +85,7 @@ type Proxy struct {
 	name     string
 	metadata string
 	methods  []string
+	streams  []streamMethod
 
 	pldPool sync.Pool
 }
@@ -92,6 +100,7 @@ func NewProxy(name string, metadata string, log *zap.Logger, grpcPool Pool, mu *
 		name:     name,
 		metadata: metadata,
 		methods:  make([]string, 0),
+		streams:  make([]streamMethod, 0),
 		pldPool: sync.Pool{
 			New: func() any {
 				return &payload.Payload{
@@ -109,6 +118,14 @@ func (p *Proxy) RegisterMethod(method string) {
 	p.methods = append(p.methods, method)
 }
 
+func (p *Proxy) RegisterStreamMethod(name string, streamRequest bool, streamResponse bool) {
+	p.streams = append(p.streams, streamMethod{
+		Name:           name,
+		StreamsRequest: streamRequest,
+		StreamsReturns: streamResponse,
+	})
+}
+
 // ServiceDesc returns a service description for the proxy.
 func (p *Proxy) ServiceDesc() *grpc.ServiceDesc {
 	desc := &grpc.ServiceDesc{
@@ -124,6 +141,16 @@ func (p *Proxy) ServiceDesc() *grpc.ServiceDesc {
 		desc.Methods = append(desc.Methods, grpc.MethodDesc{
 			MethodName: m,
 			Handler:    p.methodHandler(m),
+		})
+	}
+
+	// Registering stream methods
+	for _, m := range p.streams {
+		desc.Streams = append(desc.Streams, grpc.StreamDesc{
+			StreamName:    m.Name,
+			Handler:       p.streamHandler(m),
+			ServerStreams: m.StreamsReturns,
+			ClientStreams: m.StreamsRequest,
 		})
 	}
 
@@ -165,6 +192,74 @@ func (p *Proxy) methodHandler(method string) func(srv any, ctx context.Context, 
 		}
 
 		return interceptor(ctx, in, info, handler)
+	}
+}
+
+func (p *Proxy) streamHandler(method streamMethod) func(srv any, ss grpc.ServerStream) error {
+	return func(srv any, ss grpc.ServerStream) error {
+		in := &codec.RawMessage{}
+		if err := ss.RecvMsg(in); err != nil {
+			if err == io.EOF {
+				return nil // no data received, just return
+			}
+			return wrapError(err)
+		}
+
+		pld := p.getPld()
+		defer p.putPld(pld)
+
+		ctx := ss.Context()
+		// experimental grpc API
+		st := grpc.ServerTransportStreamFromContext(ctx)
+
+		err := p.makePayload(ctx, method.Name, in, pld)
+		if err != nil {
+			return err
+		}
+
+		stopCh := make(chan struct{})
+		defer close(stopCh)
+
+		p.mu.RLock()
+		re, err := p.grpcPool.Exec(ctx, pld, stopCh)
+		p.mu.RUnlock()
+		if err != nil {
+			return wrapError(err)
+		}
+
+		var r *payload.Payload
+
+		for {
+			select {
+			case pl, ok := <-re:
+				if !ok {
+					return nil
+				}
+				if pl.Error() != nil {
+					return pl.Error()
+				}
+				// assign the payload
+				r = pl.Payload()
+
+				err = p.responseMetadata(st, r)
+				if err != nil {
+					return err
+				}
+
+				err = ss.SendMsg(codec.RawMessage(r.Body))
+				if err != nil {
+					return wrapError(err)
+				}
+
+				if pl.Payload().Flags&frame.STREAM == 0 {
+					return nil
+				}
+
+				if !method.StreamsReturns {
+					return nil
+				}
+			}
+		}
 	}
 }
 
