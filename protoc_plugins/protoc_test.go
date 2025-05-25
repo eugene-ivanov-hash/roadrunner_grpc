@@ -197,6 +197,34 @@ func Test_NoPackage(t *testing.T) {
 	assert.NoError(t, os.RemoveAll("plugin"))
 }
 
+func Test_Stream(t *testing.T) {
+	workdir, err := os.Getwd()
+	require.NoError(t, err)
+	tmpdir, err := os.MkdirTemp("", "proto-test")
+	require.NoError(t, err)
+
+	require.NoError(t, build())
+
+	defer func() {
+		assert.NoError(t, os.RemoveAll(tmpdir))
+	}()
+
+	args := []string{
+		"-Itestdata",
+		"--php-grpc_out=" + tmpdir,
+		"stream/simple.proto",
+	}
+
+	protoc(t, args)
+
+	assertEqualFiles(
+		t,
+		workdir+"/testdata/stream/TestStream/StreamServiceInterface.php",
+		tmpdir+"/TestStream/StreamServiceInterface.php",
+	)
+	assert.NoError(t, os.RemoveAll("plugin"))
+}
+
 func assertEqualFiles(t *testing.T, original, generated string) {
 	assert.FileExists(t, generated)
 
