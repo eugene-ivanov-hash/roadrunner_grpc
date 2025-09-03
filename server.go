@@ -22,7 +22,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func (p *Plugin) createGRPCserver(interceptors map[string]common.Interceptor) (*grpc.Server, error) {
+func (p *Plugin) createGRPCserver(interceptors map[string]common.Interceptor, streamInterceptors map[string]common.StreamInterceptor) (*grpc.Server, error) {
 	const op = errors.Op("grpc_plugin_create_server")
 	opts, err := p.serverOptions()
 	if err != nil {
@@ -40,10 +40,24 @@ func (p *Plugin) createGRPCserver(interceptors map[string]common.Interceptor) (*
 		)
 	}
 
+	streamInterceptorsList := []grpc.StreamServerInterceptor{
+		grpc.StreamServerInterceptor(p.streamInterceptor),
+	}
+
+	for _, interceptor := range streamInterceptors {
+		streamInterceptorsList = append(
+			streamInterceptorsList,
+			interceptor.StreamServerInterceptor(),
+		)
+	}
+
 	opts = append(
 		opts,
 		grpc.ChainUnaryInterceptor(
 			unaryInterceptors...,
+		),
+		grpc.ChainStreamInterceptor(
+			streamInterceptorsList...,
 		),
 	)
 
@@ -64,6 +78,11 @@ func (p *Plugin) createGRPCserver(interceptors map[string]common.Interceptor) (*
 		for _, service := range services {
 			px := proxy.NewProxy(fmt.Sprintf("%s.%s", service.Package, service.Name), p.config.Proto[i], p.log.Named(service.Name), p.gPool, p.mu, p.prop)
 			for _, m := range service.Methods {
+				if m.StreamsRequest || m.StreamsReturns {
+					px.RegisterStreamMethod(m.Name, m.StreamsRequest, m.StreamsReturns)
+					continue
+				}
+
 				px.RegisterMethod(m.Name)
 			}
 
@@ -105,6 +124,38 @@ func (p *Plugin) interceptor(ctx context.Context, req any, info *grpc.UnaryServe
 
 	p.log.Debug("method was called successfully", zap.String("method", info.FullMethod), zap.Time("start", start), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return resp, nil
+}
+
+func (p *Plugin) streamInterceptor(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	start := time.Now()
+
+	p.queueSize.Inc()
+
+	err := handler(srv, ss)
+
+	s, ok := status.FromError(err)
+	var statusCode codes.Code
+	switch ok {
+	case true:
+		statusCode = s.Code()
+	case false:
+		statusCode = status.New(codes.Unknown, err.Error()).Code()
+	}
+
+	defer func() {
+		p.requestCounter.WithLabelValues(info.FullMethod, statusCode.String()).Inc()
+		p.requestDuration.WithLabelValues(info.FullMethod).Observe(time.Since(start).Seconds())
+		p.queueSize.Dec()
+	}()
+
+	if err != nil {
+		p.log.Error("stream call was finished with error", zap.Error(err), zap.String("stream", info.FullMethod), zap.Time("start", start), zap.Int64("elapsed", time.Since(start).Milliseconds()))
+
+		return err
+	}
+
+	p.log.Debug("stream was called successfully", zap.String("stream", info.FullMethod), zap.Time("start", start), zap.Int64("elapsed", time.Since(start).Milliseconds()))
+	return nil
 }
 
 func (p *Plugin) serverOptions() ([]grpc.ServerOption, error) {

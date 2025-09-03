@@ -18,7 +18,10 @@ interface ServiceInterface extends GRPC\ServiceInterface
     *
     * @throws GRPC\Exception\InvokeException
     */
-    public function SimpleMethod(GRPC\ContextInterface $ctx, Message $in): Message;
+    public function SimpleMethod(
+        GRPC\ContextInterface $ctx,
+        Message $in,
+    ): Message;
 
     /**
     * @param GRPC\ContextInterface $ctx
@@ -27,5 +30,8 @@ interface ServiceInterface extends GRPC\ServiceInterface
     *
     * @throws GRPC\Exception\InvokeException
     */
-    public function ImportMethod(GRPC\ContextInterface $ctx, \Test\CustomImport\Message\Message $in): \Test\CustomImport\Message\Message;
+    public function ImportMethod(
+        GRPC\ContextInterface $ctx,
+        \Test\CustomImport\Message\Message $in,
+    ): \Test\CustomImport\Message\Message;
 }

@@ -50,13 +50,31 @@ interface {{ .Service.Name | interface }} extends GRPC\ServiceInterface
 {{- $outName := name $ns $m.OutputType }}
     /**
     * @param GRPC\ContextInterface $ctx
+{{ if $m.ClientStreaming }}
+    * @param GRPC\StreamReader $reader
+{{ else }}
     * @param {{ strip_slashes $inName }} $in
+{{ end }}
+{{ if $m.ServerStreaming }}
+    * @param GRPC\StreamWriter $writer
+{{ else }}
     * @return {{ strip_slashes $outName }}
+{{ end }}
     *
     * @throws GRPC\Exception\InvokeException
     */
-    public function {{ $m.Name }}(GRPC\ContextInterface $ctx, {{ strip_slashes $inName }} $in): {{ strip_slashes $outName }};
-{{end -}}
+    public function {{ $m.Name }}(
+        GRPC\ContextInterface $ctx,
+{{ if $m.ClientStreaming }}
+        #[GRPC\Attribute\Input({{ strip_slashes $inName }}::class)] GRPC\StreamReader $reader,
+{{ else }}
+        {{ strip_slashes $inName }} $in,
+{{ end }}
+{{ if $m.ServerStreaming }}
+        #[GRPC\Attribute\Output({{ strip_slashes $outName }}::class)] GRPC\StreamWriter $writer,
+{{ end }}
+    ): {{ if $m.ServerStreaming }}void{{ else }}{{ strip_slashes $outName }}{{ end }};
+{{ end }}
 }
 `
 

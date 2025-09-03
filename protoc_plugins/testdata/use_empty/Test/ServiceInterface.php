@@ -18,5 +18,8 @@ interface ServiceInterface extends GRPC\ServiceInterface
     *
     * @throws GRPC\Exception\InvokeException
     */
-    public function Test(GRPC\ContextInterface $ctx, \Google\Protobuf\GPBEmpty $in): \Google\Protobuf\GPBEmpty;
+    public function Test(
+        GRPC\ContextInterface $ctx,
+        \Google\Protobuf\GPBEmpty $in,
+    ): \Google\Protobuf\GPBEmpty;
 }

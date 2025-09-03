@@ -18,5 +18,8 @@ interface ServiceInterface extends GRPC\ServiceInterface
     *
     * @throws GRPC\Exception\InvokeException
     */
-    public function SimpleMethod(GRPC\ContextInterface $ctx, \Message $in): \Message;
+    public function SimpleMethod(
+        GRPC\ContextInterface $ctx,
+        \Message $in,
+    ): \Message;
 }

@@ -59,7 +59,8 @@ type Plugin struct {
 	log *zap.Logger
 
 	// interceptors to chain
-	interceptors map[string]common.Interceptor
+	interceptors       map[string]common.Interceptor
+	streamInterceptors map[string]common.StreamInterceptor
 }
 
 // needed to register our codec only once. Double registration will cause panic.
@@ -125,6 +126,7 @@ func (p *Plugin) Init(cfg common.Configurer, log common.Logger, server common.Se
 	p.prop = propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}, jprop.Jaeger{})
 	p.tracer = sdktrace.NewTracerProvider()
 	p.interceptors = make(map[string]common.Interceptor)
+	p.streamInterceptors = make(map[string]common.StreamInterceptor)
 
 	return nil
 }
@@ -151,7 +153,7 @@ func (p *Plugin) Serve() chan error {
 		return errCh
 	}
 
-	p.server, err = p.createGRPCserver(p.interceptors)
+	p.server, err = p.createGRPCserver(p.interceptors, p.streamInterceptors)
 	if err != nil {
 		errCh <- errors.E(op, err)
 		return errCh
@@ -274,6 +276,13 @@ func (p *Plugin) Collects() []*dep.In {
 			p.interceptors[interceptor.Name()] = interceptor
 			p.mu.Unlock()
 		}, (*common.Interceptor)(nil)),
+		dep.Fits(func(pp any) {
+			streamInterceptor := pp.(common.StreamInterceptor)
+			// just to be safe
+			p.mu.Lock()
+			p.streamInterceptors[streamInterceptor.Name()] = streamInterceptor
+			p.mu.Unlock()
+		}, (*common.StreamInterceptor)(nil)),
 		dep.Fits(func(pp any) {
 			p.tracer = pp.(Tracer).Tracer()
 		}, (*Tracer)(nil)),

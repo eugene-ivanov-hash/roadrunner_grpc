@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package testStream;
+
+service StreamService {
+    rpc SimpleMethod (MessageIn) returns (MessageOut) {
+    }
+    rpc ClientStreamMethod (stream MessageIn) returns (MessageOut) {
+    }
+    rpc ServerStreamMethod (MessageIn) returns (stream MessageOut) {
+    }
+    rpc BidiStreamMethod (stream MessageIn) returns (stream MessageOut) {
+    }
+}
+
+message MessageIn {
+    optional int32 id = 1;
+    optional string name = 2;
+}
+
+message MessageOut {
+    optional int32 id = 1;
+    optional string name = 2;
+}
